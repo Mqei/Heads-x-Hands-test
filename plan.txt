@@ -1,0 +1,11 @@
+game_project/
+├── creatures/
+│   ├── __init__.py
+│   ├── creature.py
+│   ├── player.py
+│   └── monster.py
+├── utils/
+│   ├── __init__.py
+│   └── dice.py
+├── main.py
+└── README.md
