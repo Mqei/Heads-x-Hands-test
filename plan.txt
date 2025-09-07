@@ -1,11 +1,20 @@
 game_project/
-├── creatures/
+├── creatures/              # ваши классы — трогать не нужно
 │   ├── __init__.py
 │   ├── creature.py
 │   ├── player.py
-│   └── monster.py
-├── utils/
-│   ├── __init__.py
-│   └── dice.py
-├── main.py
+│   |── monster.py
+│   └──__pycache__
+├── console/               
+│   └── main.py             # для тестов и отладки логики
+│
+├── telegram_bot_ptb/       Cтарый бот
+│   └── bot_old.py
+│
+├── telegram_bot_aiogram/   # ← НОВАЯ СТРУКТУРА
+│   ├── main_bot.py
+│   └── bot/
+│       ├── __init__.py
+│       └── handlers.py
+│
 └── README.md
