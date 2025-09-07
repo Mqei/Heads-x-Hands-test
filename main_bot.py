@@ -10,7 +10,7 @@ import logging
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # ВСТАВЬТЕ СЮДА СВОЙ ТОКЕН
-TOKEN = "8230967064:AAH8wPUxbfzHnShPjKODinYI5yyOTP_NGoU"
+TOKEN = " "
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
