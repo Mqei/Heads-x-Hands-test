@@ -9,7 +9,15 @@ from bot.database import init_db
 import asyncio
 import logging
 
+<<<<<<< HEAD
 TOKEN = "8230967064:AAHW8ImubQfCz_QGTsz-47n6tSYwGPSRicY"
+=======
+# ВСТАВЬТЕ СЮДА СВОЙ ТОКЕН
+TOKEN = " "
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+>>>>>>> 4df39e53d3d6c0a4cafadbfb2a4ec9f3ac2e1956
 
 async def main():
     await init_db()  # ✅ Инициализируем базу данных
