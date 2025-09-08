@@ -5,11 +5,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from bot.handlers import router
-from bot.database import init_db  # <-- добавили импорт
+from bot.database import init_db
 import asyncio
 import logging
 
-TOKEN = "8230967064:AAGEo2RbMSQq8dPpQBFHmn9k7WCcVv5p97s"
+TOKEN = "8230967064:AAHW8ImubQfCz_QGTsz-47n6tSYwGPSRicY"
 
 async def main():
     await init_db()  # ✅ Инициализируем базу данных
@@ -19,9 +19,9 @@ async def main():
     dp.include_router(router)
 
     await bot.set_my_commands([
-        BotCommand(command="start", description="Начать"),
-        BotCommand(command="rename", description="Изменить имя"),
-        BotCommand(command="fight", description="Начать бой"),
+    BotCommand(command="start", description="Начать"),
+    BotCommand(command="dungeon", description="Войти в подземелье"),
+    BotCommand(command="rename", description="Изменить имя"),
     ])
 
     print("✅ Бот запущен...")

@@ -6,3 +6,4 @@ class BattleStates(StatesGroup):
     awaiting_player_name = State() # ждём ввода имени
     in_battle = State()            # в бою
     battle_finished = State()      # бой завершён
+    in_dungeon = State()           # в подземелье

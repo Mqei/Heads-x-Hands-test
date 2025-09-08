@@ -9,6 +9,7 @@ from creatures import Player, Monster
 import random
 import asyncio
 from .database import get_player_name, save_player_name
+from .dungeon import Dungeon
 
 player_names_db = {}
 router = Router()
@@ -35,22 +36,17 @@ async def cmd_rename(message: Message, state: FSMContext):
 @router.message(Command("start"), StateFilter(default_state, BattleStates))
 async def cmd_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
-
-    player_name = await get_player_name(user_id)  # ✅ Получаем из БД
+    player_name = await get_player_name(user_id)
 
     if player_name:
         await state.update_data(player_name=player_name)
-        await state.set_state(BattleStates.not_in_battle)
-        await message.answer(
-            f"🧙 С возвращением, *{player_name}*!\n\n"
-            "Готовы к новому бою? Нажмите ⚔️ *Начать бой*!",
-            reply_markup=get_start_keyboard()
-        )
+        # ✅ Сразу создаём подземелье
+        await enter_dungeon_automatically(message, state, player_name)
     else:
         await state.set_state(BattleStates.awaiting_player_name)
         await message.answer(
             "🎮 *Добро пожаловать в Creature Battle Bot!*\n\n"
-            "✏️ Введите имя вашего героя (например, 'Дайте', 'Мне', 'Работу пж'):"
+            "✏️ Введите имя вашего героя (например, 'Дайте', 'Мне','Работу пж'):"
         )
 #Forward name
 @router.message(StateFilter(BattleStates.awaiting_player_name), F.text)
@@ -65,22 +61,124 @@ async def player_name_received(message: Message, state: FSMContext):
         return
 
     user_id = message.from_user.id
-    await save_player_name(user_id, player_name)  # ✅ Сохраняем в БД
+    await save_player_name(user_id, player_name)
 
-    await state.update_data(player_name=player_name)
-    await state.set_state(BattleStates.not_in_battle)
+    # ✅ Сразу отправляем в подземелье с созданием игрока
+    await enter_dungeon_automatically(message, state, player_name)
 
-    await message.answer(
-        f"🧙 Добро пожаловать, *{player_name}*!\n\n"
-        "Готовы сразиться с монстром? Нажмите ⚔️ *Начать бой*!",
-        reply_markup=get_start_keyboard()
+#автоматизация подземелья, что бы работало    
+async def enter_dungeon_automatically(message: Message, state: FSMContext, player_name: str):
+    """Автоматический вход в подземелье после /start"""
+    # 🧙 Создаём игрока
+    player = Player(
+        attack=random.randint(10, 25),
+        defense=random.randint(5, 20),
+        max_health=random.randint(80, 150),
+        damage_range=(random.randint(3, 7), random.randint(8, 15))
     )
-    # Сохраняем имя в FSM
-    await state.update_data(player_name=player_name)
 
-    # Переходим к состоянию "не в бою"
-    await state.set_state(BattleStates.not_in_battle)
+    # 🏰 Создаём подземелье
+    dungeon = Dungeon(width=5, height=5)
 
+    # 💾 Сохраняем ВСЁ в FSM
+    await state.update_data(
+        player=player,          # ✅ Теперь игрок есть!
+        player_name=player_name,
+        dungeon=dungeon
+    )
+    await state.set_state(BattleStates.in_dungeon)
+
+    current_room = dungeon.get_current_room()
+    directions = dungeon.get_available_directions()
+
+    keyboard_buttons = []
+    dir_map = {"⬆️ Вверх": "up", "⬇️ Вниз": "down", "⬅️ Налево": "left", "➡️ Направо": "right"}
+    for dir_text in directions:
+        dir_key = dir_map.get(dir_text)
+        if dir_key:
+            keyboard_buttons.append([InlineKeyboardButton(text=dir_text, callback_data=f"move_{dir_key}")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+    text = (
+        f"🧙 *{player_name}*, храбрый искатель приключений!\n"
+        f"Вы стоите у входа в *Забытое Подземелье Загадок*...\n"
+        f"Говорят, в его глубинах спрятаны сокровища древних королей.\n\n"
+        f"🗺️ *Ваша карта:*\n\n"
+        f"{dungeon.render_map()}\n\n"
+        f"🛡️ Ваши статы: ATK={player.attack}, DEF={player.defense}, HP={player.current_health}/{player.max_health}\n"
+        f"📍 *Текущая комната:* {current_room.room_type.upper()}\n"
+        f"➡️ Выберите путь:"
+    )
+
+    await message.answer(text, reply_markup=keyboard)
+#Движение
+@router.callback_query(F.data.startswith("move_"), StateFilter(BattleStates.in_dungeon))
+async def handle_move(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    dungeon: Dungeon = data["dungeon"]
+
+    direction = callback.data.split("_")[1]
+
+    if dungeon.move_player(direction):
+        current_room = dungeon.get_current_room()
+        current_room.visited = True
+
+        # ✅ Убрали дублирующий блок здесь — оставляем один ниже
+
+        # Генерация клавиатуры
+        directions = dungeon.get_available_directions()
+        keyboard_buttons = []
+        dir_map = {"⬆️ Вверх": "up", "⬇️ Вниз": "down", "⬅️ Налево": "left", "➡️ Направо": "right"}
+        for dir_text in directions:
+            dir_key = dir_map.get(dir_text)
+            if dir_key:
+                keyboard_buttons.append([InlineKeyboardButton(text=dir_text, callback_data=f"move_{dir_key}")])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+        # Проверка типа комнаты
+        room_text = ""
+        if current_room.room_type == "monster":
+            # ✅ Генерируем монстра и начинаем бой
+            monster = Monster(
+                attack=random.randint(8, 22),
+                defense=random.randint(3, 18),
+                max_health=random.randint(60, 130),
+                damage_range=(random.randint(2, 6), random.randint(7, 13))
+            )
+            await state.update_data(monster=monster, round_num=1)
+            await state.set_state(BattleStates.in_battle)
+
+            text = (
+                f"👹 *БОЙ С МОНСТРОМ!*\n\n"
+                f"Здоровье монстра: {monster.current_health}/{monster.max_health}\n\n"
+                f"Нажмите ➡️ *Следующий раунд*, чтобы начать!"
+            )
+            await callback.message.edit_text(text, reply_markup=get_battle_keyboard())
+            return  # ✅ Важно — выходим, чтобы не показывать карту
+
+        elif current_room.room_type == "treasure":
+            room_text = "💰 *ВЫ НАШЛИ СОКРОВИЩЕ!* +50 монет!"
+        elif current_room.room_type == "trap":
+            room_text = "💀 *ЛОВУШКА!* Вы потеряли 20 HP."
+        elif current_room.room_type == "exit":
+            room_text = "🏆 *ПОЗДРАВЛЯЕМ! ВЫ НАШЛИ СОКРОВИЩНИЦУ!*"
+            await state.set_state(BattleStates.not_in_battle)
+
+        # Формируем сообщение с картой
+        text = (
+            f"🗺️ *КАРТА ПОДЗЕМЕЛЬЯ*\n\n"
+            f"{dungeon.render_map()}\n\n"
+            f"{room_text}\n"
+            f"Текущая комната: *{current_room.room_type.upper()}*\n"
+            f"Выберите направление:"
+        )
+
+        await callback.message.edit_text(text, reply_markup=keyboard)
+
+    else:
+        await callback.answer("Туда нельзя идти!", show_alert=True)
+
+    await callback.answer()
 
 # 🎲 Начало боя
 @router.callback_query(F.data == "start_fight", StateFilter(BattleStates.not_in_battle))
@@ -151,27 +249,33 @@ async def next_round(callback: CallbackQuery, state: FSMContext):
     lines.append("\n👉 *Игрок атакует...*")
     success, dice_results = player.attack_target(monster)  # ✅ Получаем броски
     dice_str = ", ".join(map(str, dice_results))
-    if 6 in dice_results:
-        lines.append("🎯 *Критический бросок!*")
-    lines.append(f"🎲 Бросок ({len(dice_results)}d6): [{dice_str}]")
+    lines.append(f"🎲 Бросок (4d6): [{dice_str}]")
 
     if success:
         lines.append("✅ *Попадание!* (выпало 5 или 6)")
     else:
         lines.append("❌ *Промах!* (ни одного 5 или 6)")
 
-    # Монстр атакует
-    lines.append("\n👹 *Монстр атакует...*")
-    success, dice_results = monster.attack_target(player)  # ✅ Получаем броски
-    dice_str = ", ".join(map(str, dice_results))
-    if 6 in dice_results:
-        lines.append("🎯 *Критический бросок!*")
-    lines.append(f"🎲 Бросок ({len(dice_results)}d6): [{dice_str}]")
+    # Проверка: если монстр умер — завершаем бой
+    if not monster.is_alive():
+        lines.append("\n🏆 *Монстр повержен!*")
+        await callback.message.edit_text("\n".join(lines))
+        await finish_battle(callback, state, winner="player")
+        return  # ✅ ВЫХОДИМ — монстр мёртв, не даём ему атаковать
 
-    if success:
-        lines.append("💥 *Попадание!*")
+    # Монстр атакует — только если жив
+    if monster.is_alive():
+        lines.append("\n👹 *Монстр атакует...*")
+        success, dice_results = monster.attack_target(player)  # ✅ Получаем броски
+        dice_str = ", ".join(map(str, dice_results))
+        lines.append(f"🎲 Бросок (4d6): [{dice_str}]")
+
+        if success:
+            lines.append("💥 *Попадание!*")
+        else:
+            lines.append("🛡️ *Уклонение!*")
     else:
-        lines.append("🛡️ *Уклонение!*")
+        lines.append("\n🏆 *Монстр уже мёртв!*")
 
     # Обновляем данные в FSM
     await state.update_data(player=player, monster=monster, round_num=round_num + 1)
@@ -204,6 +308,36 @@ async def heal_player(callback: CallbackQuery, state: FSMContext):
     # Обновляем клавиатуру — кнопка может исчезнуть, если здоровье стало >50%
     await callback.message.edit_reply_markup(reply_markup=get_battle_keyboard())
 
+# Подземелье
+#@router.message(Command("dungeon"), StateFilter(BattleStates.not_in_battle))
+#async def cmd_dungeon(message: Message, state: FSMContext):
+#    ...
+#    # Создаём новое подземелье
+#    dungeon = Dungeon(width=5, height=5)
+#
+    # Сохраняем в FSM
+#    await state.update_data(dungeon=dungeon)
+#    await state.set_state(BattleStates.in_dungeon)
+#
+#    current_room = dungeon.get_current_room()
+#    directions = dungeon.get_available_directions()
+#
+#    # Генерируем клавиатуру
+#    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+#        [InlineKeyboardButton(text=dir_text, callback_data=f"move_{dir_key}")]
+#        for dir_text, dir_key in zip(directions, ["up", "down", "left", "right"][:len(directions)])
+#    ])
+
+    # Сообщение с картой
+    #text = (
+    #    f"🗺️ *КАРТА ПОДЗЕМЕЛЬЯ*\n\n"
+   #     f"{dungeon.render_map()}\n\n"
+  #      f"Вы в комнате: *{current_room.room_type.upper()}*\n"
+ #       f"Выберите направление:"
+ #   )
+#
+#    await message.answer(text, reply_markup=keyboard)
+
 # 🏳️ Сдаться
 @router.callback_query(F.data == "surrender", StateFilter(BattleStates.in_battle))
 async def surrender(callback: CallbackQuery, state: FSMContext):
@@ -216,18 +350,59 @@ async def surrender(callback: CallbackQuery, state: FSMContext):
 
 # 🏁 Завершение боя
 async def finish_battle(callback: CallbackQuery, state: FSMContext, winner: str = None):
-    await state.set_state(BattleStates.battle_finished)
-
     data = await state.get_data()
     player = data["player"]
     monster = data["monster"]
-    player_name = data.get("player_name", "Игрок")  # <-- добавлено получение имени
+    player_name = data.get("player_name", "Игрок")
 
     if winner == "player" or (player.is_alive() and not monster.is_alive()):
         result = "🎉 *ПОБЕДА ИГРОКА!* 🎉"
+
+        # Проверяем, был ли бой в подземелье
+        current_state = await state.get_state()
+        if current_state == BattleStates.in_battle.state:
+            dungeon_data = data.get("dungeon")
+            if dungeon_data:
+                # Возвращаемся в подземелье
+                await state.set_state(BattleStates.in_dungeon)
+
+                dungeon: Dungeon = dungeon_data
+                current_room = dungeon.get_current_room()
+                directions = dungeon.get_available_directions()
+
+                # Генерируем клавиатуру
+                keyboard_buttons = []
+                dir_map = {
+                    "⬆️ Вверх": "up",
+                    "⬇️ Вниз": "down",
+                    "⬅️ Налево": "left",
+                    "➡️ Направо": "right"
+                }
+                for dir_text in directions:
+                    dir_key = dir_map.get(dir_text)
+                    if dir_key:
+                        keyboard_buttons.append([
+                            InlineKeyboardButton(text=dir_text, callback_data=f"move_{dir_key}")
+                        ])
+
+                keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+                # Сообщение
+                text = (
+                    f"🗺️ *КАРТА ПОДЗЕМЕЛЬЯ*\n\n"
+                    f"{dungeon.render_map()}\n\n"
+                    f"✅ *Монстр повержен!*\n"
+                    f"Текущая комната: *{current_room.room_type.upper()}*\n"
+                    f"Выберите направление:"
+                )
+
+                await callback.message.edit_text(text, reply_markup=keyboard)
+                return  # ✅ Завершаем функцию — не показываем стандартное сообщение о победе
+
     else:
         result = "💀 *МОНСТР ПОБЕДИЛ!* 💀"
 
+    # Стандартное сообщение о конце боя (если не в подземелье)
     text = (
         f"{result}\n\n"
         f"🧙 *{player_name}*: {player.current_health}/{player.max_health} ❤️\n"

@@ -1,7 +1,7 @@
 # bot/database.py
 import aiosqlite
 import os
-
+import json
 DB_PATH = "players.db"
 
 async def init_db():

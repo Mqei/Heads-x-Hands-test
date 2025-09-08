@@ -101,7 +101,8 @@ class Creature:
             raise ValueError("Мертвое существо не может атаковать")
         if not target.is_alive():
             return False, []
-
+        if not self.is_alive():
+            return False, []  
         # 🎲 Всегда бросаем 4 кубика — независимо от модификатора
         num_dice = 4
         dice_results = self._roll_dice(num_dice)
