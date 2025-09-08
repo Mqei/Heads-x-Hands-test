@@ -5,29 +5,23 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from bot.handlers import router
+from bot.database import init_db  # <-- добавили импорт
 import asyncio
 import logging
-from aiogram.fsm.storage.memory import MemoryStorage
 
-# ВСТАВЬТЕ СЮДА СВОЙ ТОКЕН
-TOKEN = "8230967064:AAH8wPUxbfzHnShPjKODinYI5yyOTP_NGoU"
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+TOKEN = "8230967064:AAGEo2RbMSQq8dPpQBFHmn9k7WCcVv5p97s"
 
 async def main():
-    # Создаём бота и диспетчер
+    await init_db()  # ✅ Инициализируем базу данных
     bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Подключаем роутер с обработчиками
     dp.include_router(router)
 
-    # Устанавливаем команды в меню
     await bot.set_my_commands([
         BotCommand(command="start", description="Начать"),
+        BotCommand(command="rename", description="Изменить имя"),
         BotCommand(command="fight", description="Начать бой"),
-        BotCommand(command="next", description="Следующий раунд"),
     ])
 
     print("✅ Бот запущен...")

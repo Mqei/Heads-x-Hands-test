@@ -85,50 +85,38 @@ class Creature:
             raise ValueError("Должен быть брошен хотя бы один кубик")
         return [random.randint(1, 6) for _ in range(num_dice)]
 
-    def attack_target(self, target: 'Creature') -> bool:
+    def attack_target(self, target: 'Creature') -> tuple[bool, list[int]]:
         """
         Атаковать другое существо.
 
-        Алгоритм:
-          1. Модификатор атаки = attack - defense цели + 1 (минимум 1)
-          2. Бросаем столько кубиков d6, сколько модификатор
-          3. Успех — если хотя бы один кубик 5 или 6
-          4. При успехе — наносим случайный урон из damage_range
+        Всегда бросается 4 кубика d6.
+        Успех — если хотя бы один кубик 5 или 6.
 
         :param target: цель атаки (объект Creature)
-        :return: True, если атака успешна, иначе False
+        :return: (успех: bool, результаты_бросков: list[int])
         """
         if not isinstance(target, Creature):
             raise TypeError("Цель должна быть объектом класса Creature")
         if not self.is_alive():
             raise ValueError("Мертвое существо не может атаковать")
         if not target.is_alive():
-            return False
+            return False, []
 
-        # 1. Рассчитываем модификатор
-        attack_modifier = self.attack - target.defense + 1
-        num_dice = max(1, attack_modifier)  # минимум 1 кубик
-
-        # 2. Бросаем кубики
+        # 🎲 Всегда бросаем 4 кубика — независимо от модификатора
+        num_dice = 4
         dice_results = self._roll_dice(num_dice)
 
-        # 🎲 Выводим результат броска
-        print(f"Бросок кубиков ({num_dice}d6): {dice_results}")
-
-        # 3. Проверяем успех
+        # ✅ Успех — если хотя бы один кубик 5 или 6
         success = any(die >= 5 for die in dice_results)
 
-        # 4. Если успешно — наносим урон
+        # Если успешно — наносим урон
         if success:
             min_dmg, max_dmg = self.damage_range
             damage_dealt = random.randint(min_dmg, max_dmg)
             target.take_damage(damage_dealt)
-            print(f"💥 Нанесено {damage_dealt} урона. Здоровье цели: {target.current_health}")
-        else:
-            print("🛡️ Промах! Ни один кубик не показал 5 или 6.")
 
-        return success
+        return success, dice_results
 
     def __str__(self):
-        return (f"{self.__class__.__name__}(ATK={self.attack}, DEF={self.defense}, "
-                f"HP={self.current_health}/{self.max_health}, DMG={self.damage_range[0]}-{self.damage_range[1]})")
+            return (f"{self.__class__.__name__}(ATK={self.attack}, DEF={self.defense}, "
+                    f"HP={self.current_health}/{self.max_health}, DMG={self.damage_range[0]}-{self.damage_range[1]})")
