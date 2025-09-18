@@ -26,6 +26,14 @@ class Player(Creature):
     def heal_uses_left(self) -> int:
         return self._heal_uses_left
 
+    @property
+    def current_health(self):
+        return self._current_health
+
+    @current_health.setter
+    def current_health(self, value):
+        self._current_health = value
+
     def heal(self) -> bool:
         """
         Исцелить себя на 30% от максимального здоровья.

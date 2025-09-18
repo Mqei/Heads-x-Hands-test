@@ -6,9 +6,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup, default_state
 from .states import BattleStates
 from creatures import Player, Monster
+from creatures.creature import Creature
 import random
 import asyncio
-from .database import get_player_name, save_player_name
+import os
+import json
+import aiosqlite
+from .database import get_player_name, save_player_name, save_game_state, load_game_state
 from .dungeon import Dungeon
 
 player_names_db = {}
@@ -26,6 +30,38 @@ def get_start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚔️ Начать бой", callback_data="start_fight")]
     ])
+
+@router.message(Command("restore"))
+async def cmd_restore(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Использование: /restore <имя_файла>")
+        return
+
+    filename = f"saves/{args[1]}"
+    if not os.path.exists(filename):
+        await message.answer("Файл не найден.")
+        return
+
+    with open(filename, 'r', encoding='utf-8') as f:
+        backup_data = json.load(f)
+
+
+    dungeon_data = backup_data["dungeon"]
+    player_data = backup_data["player"]
+    name = backup_data["name"]
+
+    await save_player_name(user_id, name)
+
+    async with aiosqlite.connect("players.db") as db:
+        await db.execute("""
+            UPDATE players SET dungeon_state = ?, player_state = ? WHERE user_id = ?
+        """, (json.dumps(dungeon_data), json.dumps(player_data), user_id))
+        await db.commit()
+
+    await message.answer(f"✅ Прогресс из {args[1]} восстановлен!")
+    await cmd_start(message, state)  
 
 @router.message(Command("rename"))
 async def cmd_rename(message: Message, state: FSMContext):
@@ -68,25 +104,40 @@ async def player_name_received(message: Message, state: FSMContext):
 
 #автоматизация подземелья, что бы работало    
 async def enter_dungeon_automatically(message: Message, state: FSMContext, player_name: str):
-    """Автоматический вход в подземелье после /start"""
-    # 🧙 Создаём игрока
-    player = Player(
-        attack=random.randint(10, 25),
-        defense=random.randint(5, 20),
-        max_health=random.randint(80, 150),
-        damage_range=(random.randint(3, 7), random.randint(8, 15))
-    )
+    """Автоматический вход в подземелье после /start — с загрузкой сохранения"""
+    user_id = message.from_user.id
 
-    # 🏰 Создаём подземелье
-    dungeon = Dungeon(width=5, height=5)
+    # Пробуем загрузить сохранение
+    game_state = await load_game_state(user_id)
+    
+    if game_state:
+        dungeon, player = game_state
+        text = f"🧙 *{player_name}*, добро пожаловать обратно!\nВаше приключение продолжается..."
+    else:
+        # Создаём нового игрока и подземелье
+        player = Player(
+            attack=random.randint(10, 25),
+            defense=random.randint(5, 20),
+            max_health=random.randint(80, 150),
+            damage_range=(random.randint(3, 7), random.randint(8, 15))
+        )
+        dungeon = Dungeon(width=5, height=5)
+        text = (
+            f"🧙 *{player_name}*, храбрый искатель приключений!\n"
+            f"Вы стоите у входа в *Забытое Подземелье Загадок*...\n"
+            f"Говорят, в его глубинах спрятаны сокровища древних королей."
+        )
 
-    # 💾 Сохраняем ВСЁ в FSM
+    # Сохраняем в FSM
     await state.update_data(
-        player=player,          # ✅ Теперь игрок есть!
+        player=player,
         player_name=player_name,
         dungeon=dungeon
     )
     await state.set_state(BattleStates.in_dungeon)
+
+    # Сохраняем в БД (даже если загрузили — обновляем)
+    await save_game_state(user_id, dungeon, player)
 
     current_room = dungeon.get_current_room()
     directions = dungeon.get_available_directions()
@@ -99,13 +150,11 @@ async def enter_dungeon_automatically(message: Message, state: FSMContext, playe
             keyboard_buttons.append([InlineKeyboardButton(text=dir_text, callback_data=f"move_{dir_key}")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
-    text = (
-        f"🧙 *{player_name}*, храбрый искатель приключений!\n"
-        f"Вы стоите у входа в *Забытое Подземелье Загадок*...\n"
-        f"Говорят, в его глубинах спрятаны сокровища древних королей.\n\n"
-        f"🗺️ *Ваша карта:*\n\n"
+    text += (
+        f"\n\n🗺️ *Ваша карта:*\n\n"
         f"{dungeon.render_map()}\n\n"
-        f"🛡️ Ваши статы: ATK={player.attack}, DEF={player.defense}, HP={player.current_health}/{player.max_health}\n"
+        f"🛡️ Ваши статы: ATK={player.attack}, DEF={player.defense}, "
+        f"HP={player.current_health}/{player.max_health}\n"
         f"📍 *Текущая комната:* {current_room.room_type.upper()}\n"
         f"➡️ Выберите путь:"
     )
@@ -179,6 +228,60 @@ async def handle_move(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Туда нельзя идти!", show_alert=True)
 
     await callback.answer()
+        # Автосохранение прогресса
+    user_id = callback.from_user.id
+    data = await state.get_data()
+    player = data["player"]
+    dungeon = data["dungeon"]
+    await save_game_state(user_id, dungeon, player)
+#newgame
+@router.message(Command("newgame"))
+async def cmd_newgame(message: Message, state: FSMContext):
+    """Начать новое приключение — стирает сохранение"""
+    user_id = message.from_user.id
+    data = await state.get_data()
+    player_name = data.get("player_name")
+
+    if not player_name:
+        await message.answer("Сначала введите имя командой /start")
+        return
+
+    # Создаём нового игрока и подземелье
+    player = Player(
+        attack=random.randint(10, 25),
+        defense=random.randint(5, 20),
+        max_health=random.randint(80, 150),
+        damage_range=(random.randint(3, 7), random.randint(8, 15))
+    )
+    dungeon = Dungeon(width=5, height=5)
+
+    # Сохраняем в FSM и БД
+    await state.update_data(player=player, player_name=player_name, dungeon=dungeon)
+    await state.set_state(BattleStates.in_dungeon)
+    await save_game_state(user_id, dungeon, player)
+
+    current_room = dungeon.get_current_room()
+    directions = dungeon.get_available_directions()
+
+    keyboard_buttons = []
+    dir_map = {"⬆️ Вверх": "up", "⬇️ Вниз": "down", "⬅️ Налево": "left", "➡️ Направо": "right"}
+    for dir_text in directions:
+        dir_key = dir_map.get(dir_text)
+        if dir_key:
+            keyboard_buttons.append([InlineKeyboardButton(text=dir_text, callback_data=f"move_{dir_key}")])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+    text = (
+        f"🆕 *НОВОЕ ПРИКЛЮЧЕНИЕ!*\n"
+        f"🧙 {player_name}, вы входите в новое подземелье!\n\n"
+        f"🗺️ *Карта:*\n\n"
+        f"{dungeon.render_map()}\n\n"
+        f"🛡️ Статы: ATK={player.attack}, DEF={player.defense}, HP={player.current_health}/{player.max_health}\n"
+        f"📍 Текущая комната: {current_room.room_type.upper()}\n"
+        f"➡️ Вперёд, к приключениям!"
+    )
+
+    await message.answer(text, reply_markup=keyboard)
 
 # 🎲 Начало боя
 @router.callback_query(F.data == "start_fight", StateFilter(BattleStates.not_in_battle))
